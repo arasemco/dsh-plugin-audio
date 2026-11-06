@@ -1,11 +1,9 @@
 name: Test
 
-# One responsibility: run the suites. Reusable, so the release path calls the
-# same file instead of repeating the commands.
+# One responsibility: run the suites. The Release chain calls this workflow as
+# the gate before Version tags the pushed commit, and pull requests call it
+# directly. A push to main starts Release, not Test, so the suites run once.
 on:
-  push:
-    branches:
-      - main
   pull_request:
   workflow_call:
 

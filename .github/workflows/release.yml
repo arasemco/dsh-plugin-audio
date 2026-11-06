@@ -1,21 +1,28 @@
 name: Release
 
-# One responsibility: publish the GitHub release for the tag on main. Triggered
-# by the Version run completing, because a tag pushed with GITHUB_TOKEN emits no
-# push event of its own.
+# One responsibility: publish the GitHub release for the version tag. This
+# workflow owns the push trigger and chains the two workflows: version tags the
+# commit that already carries a locally bumped manifest, then release publishes
+# that tag. Same run, no event-driven hand-off and no bot commit.
 on:
-  workflow_run:
-    workflows:
-      - Version
-    types:
-      - completed
+  push:
+    branches:
+      - main
 
 permissions:
   contents: write
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
+  version:
+    uses: ./.github/workflows/version.yml
+
   release:
-    if: github.event.workflow_run.conclusion == 'success'
+    needs: version
+    if: needs.version.outputs.created == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -25,21 +32,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Read the tag on main
-        id: tag
-        run: |
-          tag="$(git describe --tags --exact-match 2>/dev/null || true)"
-          if [ -z "${tag}" ]; then
-            echo "no tag on main; nothing to release"
-            exit 0
-          fi
-          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
-          echo "release ${tag}"
       - name: Build tarball
-        if: steps.tag.outputs.tag != ''
         run: npm pack
       - name: Record tarball SHA-256
-        if: steps.tag.outputs.tag != ''
         run: |
           echo '### Tarball SHA-256' >> "$GITHUB_STEP_SUMMARY"
           echo '```text' >> "$GITHUB_STEP_SUMMARY"
@@ -47,9 +42,8 @@ jobs:
           echo '```' >> "$GITHUB_STEP_SUMMARY"
           sha256sum *.tgz
       - name: Create release
-        if: steps.tag.outputs.tag != ''
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.tag.outputs.tag }}
+          tag_name: ${{ needs.version.outputs.tag }}
           generate_release_notes: true
           files: '*.tgz'
