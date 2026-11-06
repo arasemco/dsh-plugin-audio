@@ -1,9 +1,9 @@
 name: Version
 
-# One responsibility: tag the version the pushed commit already carries. The
-# bump is local — .githooks/pre-commit updates the manifest before the commit —
-# so nothing here decides, commits or pushes a version. This workflow is called
-# by release.yml, which chains the publish job on its outputs.
+# Mini workflow: tag the version the pushed commit already carries. The bump is
+# local — .githooks/pre-commit updates the manifest before the commit — so
+# nothing here decides, commits or pushes a version. Chained after test.yml and
+# called by release.yml, which consumes the outputs below.
 on:
   workflow_call:
     outputs:
@@ -23,6 +23,7 @@ jobs:
 
   version:
     needs: test
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     outputs:
       tag: ${{ steps.manifest.outputs.tag }}
@@ -40,14 +41,17 @@ jobs:
         id: tag
         env:
           TAG: ${{ steps.manifest.outputs.tag }}
+          # The tagger is whoever triggered the run, in GitHub's noreply form.
+          ACTOR: ${{ github.actor }}
+          ACTOR_ID: ${{ github.actor_id }}
         run: |
           if git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
             echo "${TAG} exists already; nothing to tag"
             echo "created=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.name "${ACTOR}"
+          git config user.email "${ACTOR_ID}+${ACTOR}@users.noreply.github.com"
           git tag -a "${TAG}" -m "${TAG}"
           git push origin "${TAG}"
           echo "created=true" >> "$GITHUB_OUTPUT"

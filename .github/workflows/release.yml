@@ -1,16 +1,17 @@
 name: Release
 
-# One responsibility: publish the GitHub release for the version tag. This
-# workflow owns the push trigger and chains the two workflows: version tags the
-# commit that already carries a locally bumped manifest, then release publishes
-# that tag. Same run, no event-driven hand-off and no bot commit.
+# The entry workflow, and the chain: release.yml → version.yml → test.yml, each
+# gated by needs. One trigger here, the other two workflows are workflow_call
+# only. version.yml tags the commit that already carries the locally bumped
+# manifest; then this workflow publishes that tag.
 on:
   push:
     branches:
       - main
+  pull_request:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: release-${{ github.ref }}
@@ -19,15 +20,19 @@ concurrency:
 jobs:
   version:
     uses: ./.github/workflows/version.yml
+    permissions:
+      contents: write
 
   release:
     needs: version
     if: needs.version.outputs.created == 'true'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: main
+          ref: ${{ needs.version.outputs.tag }}
           fetch-depth: 0
       - uses: actions/setup-node@v4
         with:

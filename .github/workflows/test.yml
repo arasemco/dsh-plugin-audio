@@ -1,10 +1,8 @@
 name: Test
 
-# One responsibility: run the suites. The Release chain calls this workflow as
-# the gate before Version tags the pushed commit, and pull requests call it
-# directly. A push to main starts Release, not Test, so the suites run once.
+# Mini workflow: run the suites. Chained under version.yml, which is chained
+# under release.yml; the entry workflow owns the trigger, this one only runs.
 on:
-  pull_request:
   workflow_call:
 
 permissions:
