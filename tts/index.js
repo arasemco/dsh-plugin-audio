@@ -15,6 +15,8 @@
 
 import { createHash } from 'node:crypto'
 
+import z from '@deepseek-ai/schemastery'
+
 import { number, numbers } from '../lib/config.js'
 import { bodyError, json, readJson, routes } from '../lib/http.js'
 
@@ -54,6 +56,20 @@ const COMPONENT = {
   description: 'Speaks the discovered speech engine into a seekable player',
   routes: ['/tts/info', '/tts/speak', '/tts/cast'],
 }
+
+/**
+ * This row's config schema: the read-aloud preferences, published as this row's
+ * form on the Plugins page. Range enforcement stays in `apply`.
+ */
+export const Config = z.object({
+  server: z.union([z.string(), z.const(null)]).default(DEFAULTS.server).description('Preferred server id; unset means the first discovered'),
+  model: z.union([z.string(), z.const(null)]).default(DEFAULTS.model).description('Preferred model id; unset means the first discovered'),
+  voice: z.union([z.string(), z.const(null)]).default(DEFAULTS.voice).description('Preferred voice id or label; unset means the engine default'),
+  speed: z.number().default(DEFAULTS.speed).description('Speaking rate applied when a request names none'),
+  speeds: z.array(z.number()).default([...DEFAULTS.speeds]).description('Rates offered by the player'),
+  maxChars: z.natural().default(DEFAULTS.maxChars).description('Longest text one synthesis request accepts'),
+  cacheBytes: z.natural().default(DEFAULTS.cacheBytes).description('Bytes of synthesized audio kept for instant replay'),
+})
 
 /** Required Host services: routes and the bundle's protocol service. */
 export const inject = ['webServer', 'audioProtocol']

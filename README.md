@@ -99,9 +99,19 @@ boot. Remove those two bundles from the profile before adding this one.
 
 ## Configuration
 
-Machine-specific values belong in the profile's own `cordis.patch.yml`, as
-id-targeted overrides of these rows — nothing about this machine is baked into
-the package:
+Each row publishes a schemastery `Config`, so the settings service has a form for
+it and the Plugins screen gives that component a **Configure** page: open
+*Plugins → Audio*, press Configure on a component, and change the same fields
+the patch accepts. The page writes the profile's own `cordis.patch.yml` (the
+user layer) as an id-targeted override of that row, then the Loader reconciles
+the row live — no restart.
+
+The file stays the source of truth, so either way of editing shows up in the
+other: an override made by hand appears in the page as a field with a Reset
+control, and a Reset removes the override and re-inherits the row's default.
+
+Nothing about this machine is baked into the package; machine-specific values
+belong in the profile's own patch, for example:
 
 ```yaml
 - id: audio-core
@@ -123,12 +133,15 @@ the package:
     language: auto
 ```
 
-| Row | Config |
-|---|---|
-| `audio-core` | `endpoints`, `discoveryTtlMs`, `failureTtlMs`, `probeTimeoutMs`, `logLimit`, `speakTimeoutMs`, `transcribeTimeoutMs`, `voiceCatalog` |
-| `audio-tts` | `server`, `model`, `voice`, `speed`, `speeds`, `maxChars`, `cacheBytes` |
-| `audio-stt` | `server`, `model`, `language`, `maxAudioBytes` |
-| `audio-status` | `sample` (the sentence the round-trip test speaks) |
+| Row | Config | On the page |
+|---|---|---|
+| `audio-core` | `endpoints`, `discoveryTtlMs`, `failureTtlMs`, `probeTimeoutMs`, `logLimit`, `speakTimeoutMs`, `transcribeTimeoutMs`, `voiceCatalog` | voice catalog paths, discovery TTL, log size |
+| `audio-tts` | `server`, `model`, `voice`, `speed`, `speeds`, `maxChars`, `cacheBytes` | server, model, voice (from discovery), speed, max characters |
+| `audio-stt` | `server`, `model`, `language`, `maxAudioBytes` | server, model, language (from discovery), max recording size |
+| `audio-status` | `sample` | the round-trip sentence |
+
+A field left empty on the page is cleared from the user layer, so the row
+inherits its default again — that is what the Reset control does explicitly.
 
 ## Tests
 

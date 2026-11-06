@@ -11,9 +11,11 @@
  * model a server lists is offered, and capability decides what speaks.
  */
 
+import z from '@deepseek-ai/schemastery'
+
 import { number } from '../lib/config.js'
 import { bodyError, json, readJson, routes } from '../lib/http.js'
-import { LEVELS, createProtocol, optionsOf } from '../lib/protocol.js'
+import { DEFAULTS, LEVELS, createProtocol, optionsOf } from '../lib/protocol.js'
 
 /** The component record the inventory row reports while this row is mounted. */
 const COMPONENT = {
@@ -23,6 +25,23 @@ const COMPONENT = {
   description: 'Discovers the OpenAI-compatible audio providers, performs the wire calls, and owns the shared event log',
   routes: ['/audio/log'],
 }
+
+/**
+ * This row's config schema. The Loader parses the row's config through it, so the
+ * defaults here are the values a profile that sets nothing gets, and the settings
+ * service publishes exactly these fields as this row's form on the Plugins page.
+ * Ranges stay in `optionsOf`, which clamps every value the row ever sees.
+ */
+export const Config = z.object({
+  endpoints: z.array(z.any()).default(DEFAULTS.endpoints).description('Extra audio servers that are not configured model providers'),
+  discoveryTtlMs: z.natural().default(DEFAULTS.discoveryTtlMs).description('How long a discovery result is reused, in milliseconds'),
+  failureTtlMs: z.natural().default(DEFAULTS.failureTtlMs).description('How long a provider that failed its probe is left alone, in milliseconds'),
+  probeTimeoutMs: z.natural().default(DEFAULTS.probeTimeoutMs).description('Upper bound for one capability probe, in milliseconds'),
+  logLimit: z.natural().default(DEFAULTS.logLimit).description('Retained entries in the shared event log'),
+  speakTimeoutMs: z.natural().default(DEFAULTS.speakTimeoutMs).description('Upper bound for one synthesis request, in milliseconds'),
+  transcribeTimeoutMs: z.natural().default(DEFAULTS.transcribeTimeoutMs).description('Upper bound for one transcription request, in milliseconds'),
+  voiceCatalog: z.array(z.string()).default(DEFAULTS.voiceCatalog).description('Paths to the engines own server.json catalogs, for voice tags'),
+})
 
 /** Required Host services: routes, provider configuration, and the provider directory. */
 export const inject = ['webServer', 'settings', 'llm']

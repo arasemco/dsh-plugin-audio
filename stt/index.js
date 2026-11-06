@@ -13,6 +13,8 @@
  * its limits.
  */
 
+import z from '@deepseek-ai/schemastery'
+
 import { number } from '../lib/config.js'
 import { bodyError, json, readBody, routes } from '../lib/http.js'
 
@@ -38,6 +40,17 @@ const COMPONENT = {
   description: 'Records the microphone on the Host and transcribes it with the discovered provider',
   routes: ['/stt/info', '/stt/transcribe'],
 }
+
+/**
+ * This row's config schema: the dictation preferences, published as this row's
+ * form on the Plugins page. Range enforcement stays in `apply`.
+ */
+export const Config = z.object({
+  server: z.union([z.string(), z.const(null)]).default(DEFAULTS.server).description('Preferred provider id; unset means the first discovered'),
+  model: z.union([z.string(), z.const(null)]).default(DEFAULTS.model).description('Preferred model id; unset means the first discovered'),
+  language: z.union([z.string(), z.const(null)]).default(DEFAULTS.language).description('Language hint, or null to let the model detect it'),
+  maxAudioBytes: z.natural().default(DEFAULTS.maxAudioBytes).description('Largest accepted recording'),
+})
 
 /** Required Host services: routes and the bundle's protocol service. */
 export const inject = ['webServer', 'audioProtocol']

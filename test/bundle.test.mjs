@@ -120,6 +120,50 @@ test('every row reuses the shared modules instead of restating them', () => {
   }
 })
 
+test('every row publishes a native config schema, so it has a Plugins-screen form', async () => {
+  /* The settings service publishes a form for a row only when the row's module
+     exports a schemastery schema; the Loader validates the row's config through
+     it. Without one, the row shows neither a schema nor a configuration page. */
+  const rows = ['core', 'tts', 'stt', 'status']
+  for (const row of rows) {
+    const module = await import(new URL(`${row}/index.js`, root))
+    assert.ok(module.Config !== undefined, `${row} exports Config`)
+    assert.equal(Reflect.get(module.Config, Symbol.for('schemastery')), true, `${row}'s Config is a native schema`)
+    assert.equal(typeof module.Config.toJSON, 'function', `${row}'s Config serializes for the client`)
+    const parsed = module.Config({})
+    assert.equal(typeof parsed, 'object', `${row}'s Config accepts an empty section`)
+  }
+  assert.equal(manifest.dependencies['@deepseek-ai/schemastery'] !== undefined, true, 'the package declares the schema dependency')
+})
+
+test('each schema default is the value the row falls back to', async () => {
+  const cases = {
+    core: { discoveryTtlMs: 15000, logLimit: 200 },
+    tts: { speed: 1, maxChars: 4000, speeds: [0.75, 1, 1.25, 1.5, 2] },
+    /* A nullable preference has no schema fallback: unset is the default. */
+    stt: { maxAudioBytes: 32 * 1024 * 1024, language: undefined },
+    status: { sample: 'The audio bundle is reading this sentence and hearing it back.' },
+  }
+  for (const [row, expected] of Object.entries(cases)) {
+    const module = await import(new URL(`${row}/index.js`, root))
+    const defaults = module.Config({})
+    for (const [field, value] of Object.entries(expected)) {
+      assert.deepEqual(defaults[field], value, `${row}.${field} defaults to the row's own fallback`)
+    }
+  }
+})
+
+test('the browser half keys its configuration pages by this package name', () => {
+  const client = readFileSync(new URL('lib/client.js', root), 'utf8')
+  const declared = /const PKG_ID = '([^']+)'/.exec(client)
+  assert.ok(declared !== null, 'the client declares the package it configures')
+  assert.equal(declared[1], manifest.name, 'a page key is <package>#<row id>, so the name must match the manifest')
+  for (const rowId of ['audio-core', 'audio-tts', 'audio-stt', 'audio-status']) {
+    assert.ok(client.includes(`rowId: '${rowId}'`), `a page exists for ${rowId}`)
+    assert.ok(patch.includes(`id: ${rowId}`), `the patch declares ${rowId}`)
+  }
+})
+
 test('the status row reads its identity from the package root it ships beside', () => {
   /* `files` ships no package.json copy inside a subdirectory, so the version the
      inventory reports comes from the manifest one directory up. */

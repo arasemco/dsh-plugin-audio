@@ -166,6 +166,21 @@ function useDom (dom) {
   }
 }
 
+/**
+ * The conversation-slot registrations, in mount order: the speech surfaces only,
+ * without the Plugins-screen configuration pages the bundle also registers.
+ * @param registrations - every slot registration the bundle made.
+ * @returns The surface registrations.
+ */
+function surfaces (registrations) {
+  return registrations.filter((row) => row.spec.name !== 'plugins.row.config')
+}
+
+/** The configuration pages the bundle registered, keyed by Host row. */
+function pages (registrations) {
+  return registrations.filter((row) => row.spec.name === 'plugins.row.config')
+}
+
 /** Wait for the `/audio/status` probe and the slot registrations it decides. */
 async function settle () {
   await new Promise((resolve) => setTimeout(resolve, 0))
@@ -505,6 +520,28 @@ async function click (dom, element, wait = 20) {
   await act(async () => {
     element.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }))
     await new Promise((resolve) => setTimeout(resolve, wait))
+  })
+}
+
+/**
+ * Set a form control's value through the native setter and dispatch the event
+ * React listens for, so a controlled or uncontrolled field sees the change.
+ * @param dom - jsdom window owning the element.
+ * @param element - the input, textarea, or select.
+ * @param value - the new value.
+ * @param eventName - `change` for a select, `focusout` for a field committed on blur.
+ * @returns Completion after React processed the event.
+ */
+async function edit (dom, element, value, eventName) {
+  await act(async () => {
+    const prototype = element.tagName === 'SELECT'
+      ? dom.window.HTMLSelectElement.prototype
+      : element.tagName === 'TEXTAREA'
+        ? dom.window.HTMLTextAreaElement.prototype
+        : dom.window.HTMLInputElement.prototype
+    Object.getOwnPropertyDescriptor(prototype, 'value').set.call(element, value)
+    element.dispatchEvent(new dom.window.Event(eventName, { bubbles: true }))
+    await new Promise((resolve) => setTimeout(resolve, 10))
   })
 }
 
@@ -1140,14 +1177,14 @@ test('mounts both slot surfaces and renders the listen control', async () => {
   const registrations = []
   mod.apply(fakeContext(registrations, []))
   await settle()
-  assert.deepEqual(registrations.map((row) => row.spec.name), [
+  assert.deepEqual(surfaces(registrations).map((row) => row.spec.name), [
     'conversation.chat.assistant-actions',
     'conversation.input.right',
     'conversation.input.dock',
     'conversation.input.dock',
     'conversation.input.right',
   ])
-  assert.deepEqual(registrations.map((row) => row.spec.id), [
+  assert.deepEqual(surfaces(registrations).map((row) => row.spec.id), [
     'tts-listen',
     'tts-read-aloud',
     'tts-caption',
@@ -1156,7 +1193,7 @@ test('mounts both slot surfaces and renders the listen control', async () => {
   ])
   assert.ok(dom.window.document.head.querySelector('style[data-plugin-css]') !== null, 'stylesheet is injected')
 
-  const action = registrations[0]
+  const action = surfaces(registrations)[0]
   const markup = renderToStaticMarkup(React.createElement(action.component, {
     ...action.injected,
     messageId: 'm-1',
@@ -1166,7 +1203,7 @@ test('mounts both slot surfaces and renders the listen control', async () => {
   assert.match(markup, /aria-label="action.listen"/)
   assert.match(markup, /data-icon="play"/)
 
-  const control = registrations[1]
+  const control = surfaces(registrations)[1]
   const trigger = renderToStaticMarkup(React.createElement(control.component, {
     ...control.injected,
     sessionId: 's1',
@@ -1280,7 +1317,7 @@ test('registers the dictation control and the listening bar', async () => {
   const registrations = []
   mod.apply(fakeContext(registrations))
   await settle()
-  const stt = registrations.filter((row) => row.spec.id.startsWith('stt-'))
+  const stt = surfaces(registrations).filter((row) => row.spec.id.startsWith('stt-'))
   assert.deepEqual(stt.map((row) => row.spec.id), ['stt-listening', 'stt-dictate'])
   assert.deepEqual(stt.map((row) => row.spec.name), ['conversation.input.dock', 'conversation.input.right'])
   assert.ok(dom.window.document.head.querySelector('style[data-plugin-css]') !== null)
@@ -1489,8 +1526,8 @@ test('a status listing without stt registers no dictation slot and renders no mi
   const locales = []
   mod.apply(fakeContext(registrations, [], { locales }))
   await settle()
-  assert.deepEqual(registrations.map((row) => row.spec.id), ['tts-listen', 'tts-read-aloud', 'tts-caption'])
-  assert.deepEqual(locales.map((row) => row.ns), ['tts', 'stt'], 'both dictionaries are registered even when a half is off')
+  assert.deepEqual(surfaces(registrations).map((row) => row.spec.id), ['tts-listen', 'tts-read-aloud', 'tts-caption'])
+  assert.deepEqual(locales.map((row) => row.ns), ['tts', 'stt', 'audio'], 'both dictionaries are registered even when a half is off')
   for (const row of locales) assert.deepEqual(Object.keys(row.dicts.zh).sort(), Object.keys(row.dicts.en).sort())
 
   const { container, root, restore } = await renderAll(dom, registrations)
@@ -1513,8 +1550,8 @@ test('a status listing without tts registers none of the read-aloud slots', asyn
   const registrations = []
   mod.apply(fakeContext(registrations, []))
   await settle()
-  assert.deepEqual(registrations.map((row) => row.spec.id), ['stt-listening', 'stt-dictate'])
-  assert.equal(registrations.some((row) => row.spec.id.startsWith('tts-')), false, 'no read-aloud surface is mounted')
+  assert.deepEqual(surfaces(registrations).map((row) => row.spec.id), ['stt-listening', 'stt-dictate'])
+  assert.equal(surfaces(registrations).some((row) => row.spec.id.startsWith('tts-')), false, 'no read-aloud surface is mounted')
   dom.window.close()
 })
 
@@ -1525,7 +1562,7 @@ test('a 404 status probe registers both halves instead of hiding UI', async () =
   const registrations = []
   mod.apply(fakeContext(registrations, []))
   await settle()
-  assert.deepEqual(registrations.map((row) => row.spec.id), [
+  assert.deepEqual(surfaces(registrations).map((row) => row.spec.id), [
     'tts-listen',
     'tts-read-aloud',
     'tts-caption',
@@ -1603,6 +1640,137 @@ test('the round-trip test posts /audio/echo and renders the transcript', async (
   assert.ok(body.text.length > 0, 'the request carries the fixed sample sentence')
   assert.match(panel.textContent, /the quick brown fox jumps over the lazy dog/, 'the transcript is rendered inline')
   assert.match(panel.textContent, /demo\.timings/, 'the timings are rendered with the transcript')
+  await act(async () => { root.unmount() })
+  restore()
+  dom.window.close()
+})
+
+/* ------------------------------------------------------------ configuration */
+
+/** Render one captured configuration page with a synthetic settings form. */
+async function renderConfigPage (dom, page, form) {
+  const container = dom.window.document.getElementById('root')
+  const restore = useDom(dom)
+  const root = ReactDOMClient.createRoot(container)
+  await act(async () => {
+    root.render(React.createElement(page.component, {
+      ...page.injected,
+      view: 'page',
+      form,
+      t: (key) => key,
+    }))
+    await new Promise((resolve) => setTimeout(resolve, 20))
+  })
+  return { container, root, restore }
+}
+
+test('registers one Plugins-screen configuration page per Host row', async () => {
+  const dom = makeDom()
+  const mod = loadBundle(dom, makeEnvironment())
+  const registrations = []
+  mod.apply(fakeContext(registrations, []))
+  await settle()
+  assert.deepEqual(pages(registrations).map((row) => row.spec.key), [
+    `${mod.__internals.PKG}#audio-core`,
+    `${mod.__internals.PKG}#audio-tts`,
+    `${mod.__internals.PKG}#audio-stt`,
+    `${mod.__internals.PKG}#audio-status`,
+  ], 'the key is exactly what the plugin manager dispatches')
+  assert.equal(mod.__internals.PKG, 'dsh-plugin-audio')
+  dom.window.close()
+})
+
+test('a configuration page renders its fields and writes them back', async () => {
+  const dom = makeDom()
+  const mod = loadBundle(dom, makeEnvironment())
+  const registrations = []
+  mod.apply(fakeContext(registrations, []))
+  await settle()
+  const page = pages(registrations).find((row) => row.spec.key.endsWith('#audio-tts'))
+  const calls = []
+  const form = {
+    state: {
+      status: 'ready',
+      value: { server: 'audio-cpp', model: 'kokoro', voice: 'af_heart', speed: 1, maxChars: 4000 },
+      base: { speed: 1, maxChars: 4000 },
+      user: { voice: 'af_heart' },
+      revision: 2,
+      writable: true,
+    },
+    mutate: async (ops) => {
+      calls.push(ops)
+      return true
+    },
+  }
+  const { container, root, restore } = await renderConfigPage(dom, page, form)
+  const labels = [...container.querySelectorAll('.dsh-audio-config-label')].map((node) => node.textContent)
+  assert.deepEqual(labels, ['config.server', 'config.model', 'config.voice', 'config.speed', 'config.maxChars'])
+
+  /* The model select offers what discovery reported. */
+  const model = container.querySelector('#dsh-audio-model')
+  const choices = [...model.querySelectorAll('option')].map((option) => option.value)
+  assert.equal(choices[0], '', 'an empty choice means "first discovered"')
+  assert.ok(choices.includes('kokoro'), 'the discovered model is offered')
+
+  await edit(dom, model, 'qwen-cv', 'change')
+  assert.deepEqual(calls.at(-1), [{ op: 'set', path: ['model'], value: 'qwen-cv' }])
+
+  /* A field the user layer set offers a reset that clears it. */
+  const reset = [...container.querySelectorAll('.dsh-audio-config-reset')]
+  assert.equal(reset.length, 1, 'only the overridden field carries a reset')
+  await click(dom, reset[0], 10)
+  assert.deepEqual(calls.at(-1), [{ op: 'unset', path: ['voice'] }])
+
+  /* A number field commits on blur, and a refused write is reported. */
+  await edit(dom, container.querySelector('#dsh-audio-maxChars'), '2000', 'focusout')
+  assert.deepEqual(calls.at(-1), [{ op: 'set', path: ['maxChars'], value: 2000 }])
+  assert.match(container.textContent, /config.saved/)
+
+  await act(async () => { root.unmount() })
+  restore()
+  dom.window.close()
+})
+
+test('the status page edits its sample sentence and reports a refusal', async () => {
+  const dom = makeDom()
+  const mod = loadBundle(dom, makeEnvironment())
+  const registrations = []
+  mod.apply(fakeContext(registrations, []))
+  await settle()
+  const page = pages(registrations).find((row) => row.spec.key.endsWith('#audio-status'))
+  const calls = []
+  const form = {
+    state: {
+      status: 'ready',
+      value: { sample: 'The audio bundle is reading this sentence and hearing it back.' },
+      base: {},
+      user: {},
+      revision: 1,
+      writable: true,
+    },
+    mutate: async (ops) => {
+      calls.push(ops)
+      return false
+    },
+  }
+  const { container, root, restore } = await renderConfigPage(dom, page, form)
+  await edit(dom, container.querySelector('#dsh-audio-sample'), 'Read this back to me.', 'focusout')
+  assert.deepEqual(calls.at(-1), [{ op: 'set', path: ['sample'], value: 'Read this back to me.' }])
+  assert.match(container.textContent, /config.refused/, 'a refused write says so')
+  await act(async () => { root.unmount() })
+  restore()
+  dom.window.close()
+})
+
+test('a configuration page says so when its component is switched off', async () => {
+  const dom = makeDom()
+  const mod = loadBundle(dom, makeEnvironment())
+  const registrations = []
+  mod.apply(fakeContext(registrations, []))
+  await settle()
+  const page = pages(registrations).find((row) => row.spec.key.endsWith('#audio-core'))
+  const { container, root, restore } = await renderConfigPage(dom, page, undefined)
+  assert.match(container.textContent, /config\.unavailable/)
   await act(async () => { root.unmount() })
   restore()
   dom.window.close()

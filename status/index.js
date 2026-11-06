@@ -14,6 +14,8 @@
 
 import { readFile } from 'node:fs/promises'
 
+import z from '@deepseek-ai/schemastery'
+
 import { json, readJson, bodyError, routes } from '../lib/http.js'
 
 /** This package's own manifest, so the inventory reports the installed version. */
@@ -30,6 +32,11 @@ const COMPONENT = {
   description: 'Reports the mounted components and speaks a sentence back through dictation',
   routes: ['/audio/status', '/audio/echo'],
 }
+
+/** This row's config schema: the sentence the round-trip test speaks. */
+export const Config = z.object({
+  sample: z.string().default(SAMPLE).description('Sentence the round-trip test speaks when the request names none'),
+})
 
 /** Required Host services: routes and the bundle's protocol service. */
 export const inject = ['webServer', 'audioProtocol']
