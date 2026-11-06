@@ -5,6 +5,7 @@
  */
 
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
 
 import { apply as core, inject as coreInject } from '../core/index.js'
@@ -29,7 +30,7 @@ test('the inventory reports the components the profile composed', async () => {
   try {
     const body = await (await fetch(`${plugin.origin}/audio/status`)).json()
     assert.equal(body.name, 'dsh-plugin-audio')
-    assert.equal(body.version, '0.0.1')
+    assert.equal(body.version, JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version)
     assert.deepEqual(body.components.map((component) => component.id), ['core', 'tts', 'stt', 'status'], 'declaration order')
     assert.deepEqual(body.components[0].routes, ['/audio/log'])
     assert.deepEqual(body.components[1].routes, ['/tts/info', '/tts/speak', '/tts/cast'])
