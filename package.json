@@ -1,0 +1,45 @@
+{
+  "name": "dsh-plugin-audio",
+  "description": "Speech for the Web GUI in one bundle: the shared OpenAI audio protocol, read-aloud, dictation, and a component inventory — four switchable components",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "main": "core/index.js",
+  "exports": {
+    ".": "./core/index.js",
+    "./core": "./core/index.js",
+    "./core/locale/*.json": "./core/locale/*.json",
+    "./tts": "./tts/index.js",
+    "./tts/locale/*.json": "./tts/locale/*.json",
+    "./stt": "./stt/index.js",
+    "./stt/locale/*.json": "./stt/locale/*.json",
+    "./status": "./status/index.js",
+    "./status/locale/*.json": "./status/locale/*.json",
+    "./client": "./lib/client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "core/index.js",
+    "core/locale/*.json",
+    "tts/index.js",
+    "tts/locale/*.json",
+    "stt/index.js",
+    "stt/locale/*.json",
+    "status/index.js",
+    "status/locale/*.json",
+    "lib/client.js",
+    "locale/*.json",
+    "README.md",
+    "cordis.patch.yml"
+  ],
+  "dsh": {
+    "client": {
+      "platform": "web"
+    },
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "license": "MIT"
+}
