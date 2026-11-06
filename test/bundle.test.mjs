@@ -9,7 +9,6 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
-import { pathToFileURL } from 'node:url'
 
 const root = new URL('../', import.meta.url)
 const manifest = JSON.parse(readFileSync(new URL('package.json', root), 'utf8'))
@@ -98,20 +97,32 @@ test('the bundle card carries its own title and description', () => {
 })
 
 test('the package ships what the patch and the browser need, and nothing else', () => {
-  for (const required of ['core/index.js', 'tts/index.js', 'stt/index.js', 'status/index.js', 'lib/client.js', 'README.md', 'cordis.patch.yml']) {
+  for (const required of ['core/index.js', 'tts/index.js', 'stt/index.js', 'status/index.js', 'lib/client.js', 'lib/config.js', 'lib/http.js', 'lib/protocol.js', 'README.md', 'cordis.patch.yml']) {
     assert.ok(manifest.files.includes(required), `${required} must ship`)
   }
 })
 
-test('the host modules import from the package directory they ship in', () => {
-  /* `files` ships no package.json copy inside a subdirectory, so the status row
-     reads its identity from the package root relative to its own module. */
+test('every row reuses the shared modules instead of restating them', () => {
+  /* One implementation per concern: the JSON/route plumbing, the config
+     readers, and the protocol engine are imported, never copied per row. */
+  const expected = {
+    'core/index.js': ['../lib/http.js', '../lib/protocol.js', '../lib/config.js'],
+    'tts/index.js': ['../lib/http.js', '../lib/config.js'],
+    'stt/index.js': ['../lib/http.js', '../lib/config.js'],
+    'status/index.js': ['../lib/http.js'],
+  }
+  for (const [module, imports] of Object.entries(expected)) {
+    const source = readFileSync(new URL(module, root), 'utf8')
+    for (const specifier of imports) {
+      assert.match(source, new RegExp(`from '${specifier.replace(/[/.]/g, '\\$&')}'`), `${module} imports ${specifier}`)
+    }
+    assert.doesNotMatch(source, /function (json|readJson|number|follow|baseUrl)\b/, `${module} must not restate a shared helper`)
+  }
+})
+
+test('the status row reads its identity from the package root it ships beside', () => {
+  /* `files` ships no package.json copy inside a subdirectory, so the version the
+     inventory reports comes from the manifest one directory up. */
   const status = readFileSync(new URL('status/index.js', root), 'utf8')
   assert.match(status, /new URL\('\.\.\/package\.json', import\.meta\.url\)/)
-  for (const module of ['core/index.js', 'tts/index.js', 'stt/index.js', 'status/index.js']) {
-    const source = readFileSync(new URL(module, root), 'utf8')
-    assert.doesNotMatch(source, /from '\.\.\/lib\//, `${module} must not reach into lib/`)
-  }
-  /* The browser bundle is served by the Host from its own directory. */
-  assert.ok(pathToFileURL(new URL('lib/client.js', root).pathname).href.startsWith('file:'))
 })

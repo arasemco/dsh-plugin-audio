@@ -4,8 +4,8 @@
  * The browser never reaches a speech engine directly (no CORS, works from any
  * browser that can open the GUI, keeps engines on loopback):
  *
- *   GET  /tts/info   → discovered speech servers, their models and voices
- *   POST /tts/speak  → { text, server?, model?, voice?, speed? } → audio/wav bytes
+ *   GET  /tts/info    → discovered speech servers, their models and voices
+ *   POST /tts/speak   → { text, server?, model?, voice?, speed? } → audio/wav bytes
  *   GET/POST /tts/cast → the multi-voice experiment flag the Host mirrors
  *
  * Discovery, the wire call, and the event log belong to the `audio-core` row and
@@ -15,15 +15,18 @@
 
 import { createHash } from 'node:crypto'
 
+import { number, numbers } from '../lib/config.js'
+import { bodyError, json, readJson, routes } from '../lib/http.js'
+
 /** Read-aloud defaults; no server, model, or voice is assumed. */
 const DEFAULTS = {
   /** Preferred server/model/voice; unset means "first discovered". */
   server: null,
   model: null,
   voice: null,
-  /** Speaking rate applied when the request names none. */
+  /** Speaking rate applied when a request names none. */
   speed: 1,
-  /** Rates offered by the GUI, applied by the browser's player. */
+  /** Rates offered by the GUI; the player applies them without new synthesis. */
   speeds: [0.75, 1, 1.25, 1.5, 2],
   /** Upper bound for one synthesis request; the GUI splits longer replies. */
   maxChars: 4000,
@@ -55,47 +58,6 @@ const COMPONENT = {
 /** Required Host services: routes and the bundle's protocol service. */
 export const inject = ['webServer', 'audioProtocol']
 
-/** Clamp a numeric config value. */
-function number (value, fallback, min, max) {
-  const parsed = typeof value === 'number' ? value : Number.parseFloat(value)
-  if (!Number.isFinite(parsed)) return fallback
-  return Math.min(max, Math.max(min, parsed))
-}
-
-/** One JSON response, always closing the response. */
-function json (res, status, body) {
-  const payload = Buffer.from(JSON.stringify(body))
-  res.writeHead(status, {
-    'content-type': 'application/json; charset=utf-8',
-    'content-length': payload.length,
-    'cache-control': 'no-store',
-  })
-  res.end(payload)
-}
-
-/** Read a JSON request body under a hard byte limit. */
-async function readJson (req, limit) {
-  const chunks = []
-  let size = 0
-  for await (const chunk of req) {
-    size += chunk.length
-    if (size > limit) {
-      const error = new Error('request body too large')
-      error.status = 413
-      throw error
-    }
-    chunks.push(chunk)
-  }
-  if (size === 0) return {}
-  try {
-    return JSON.parse(Buffer.concat(chunks).toString('utf8'))
-  } catch {
-    const error = new Error('request body is not valid JSON')
-    error.status = 400
-    throw error
-  }
-}
-
 /**
  * Mount the read-aloud routes and the multi-voice experiment.
  * @param ctx - Host context carrying the web server and the audio protocol service.
@@ -105,13 +67,14 @@ export function apply (ctx, config = {}) {
   const options = {
     ...DEFAULTS,
     ...config,
-    speeds: Array.isArray(config.speeds) && config.speeds.length > 0 ? config.speeds : DEFAULTS.speeds,
+    speed: number(config.speed, DEFAULTS.speed, 0.25, 4),
+    speeds: numbers(config.speeds, DEFAULTS.speeds),
     maxChars: number(config.maxChars, DEFAULTS.maxChars, 1, 20000),
     cacheBytes: number(config.cacheBytes, DEFAULTS.cacheBytes, 0, 512 * 1024 * 1024),
   }
   const protocol = ctx.audioProtocol
 
-  /** Synthesized-audio cache: key → bytes. Insertion order doubles as LRU order. */
+  /** Synthesized-audio cache: key → audio. Insertion order doubles as LRU order. */
   const cache = new Map()
   let cacheBytes = 0
   /** Whether the multi-voice experiment is on, as the browser last reported it. */
@@ -170,96 +133,108 @@ export function apply (ctx, config = {}) {
     return { ...audio, cached: false }
   }
 
-  /** Route dispatcher: every unmatched path under /tts answers JSON, never HTML. */
-  async function handler (req, res) {
-    const url = new URL(req.url ?? '/', 'http://localhost')
-    if (url.pathname === '/tts/info') {
-      if (req.method !== 'GET' && req.method !== 'HEAD') {
-        return json(res, 405, { error: { code: 'method', message: 'GET /tts/info' } })
-      }
-      const servers = await protocol.discover('tts', url.searchParams.get('refresh') === '1')
-      const fallback = choose()
-      return json(res, 200, {
-        /* Ordering hints stay on the Host; the browser sees only what it renders. */
-        servers: servers.map(({ id, name, baseURL, models }) => ({ id, name, baseURL, models })),
-        defaults: {
-          server: fallback?.server.id ?? null,
-          model: fallback?.model.id ?? null,
-          voice: fallback?.voice?.id ?? null,
-          speed: number(options.speed, 1, 0.25, 4),
-        },
-        speeds: options.speeds,
-        maxChars: options.maxChars,
-        component: COMPONENT.id,
-      })
-    }
-    if (url.pathname === '/tts/cast') {
-      if (req.method === 'POST') {
-        let body
-        try {
-          body = await readJson(req, 2048)
-        } catch (error) {
-          return json(res, error.status ?? 400, { error: { code: 'body', message: error.message } })
-        }
-        const enabled = body?.enabled === true
-        if (enabled !== castEnabled) {
-          castEnabled = enabled
-          note('info', enabled ? 'cast-enabled' : 'cast-disabled')
-        }
-        return json(res, 200, { enabled: castEnabled })
-      }
-      if (req.method === 'GET') return json(res, 200, { enabled: castEnabled })
-      return json(res, 405, { error: { code: 'method', message: 'GET or POST /tts/cast' } })
-    }
-    if (url.pathname === '/tts/speak') {
-      if (req.method !== 'POST') return json(res, 405, { error: { code: 'method', message: 'POST /tts/speak' } })
+  /**
+   * Discovered servers, their models and voices, and the defaults for the panel.
+   * @param res - node response.
+   * @param url - parsed request URL.
+   * @returns The response that was sent.
+   */
+  async function infoRoute (req, res, url) {
+    const servers = await protocol.discover('tts', url.searchParams.get('refresh') === '1')
+    const fallback = choose()
+    return json(res, 200, {
+      /* Ordering hints stay on the Host; the browser sees only what it renders. */
+      servers: servers.map(({ id, name, baseURL, models }) => ({ id, name, baseURL, models })),
+      defaults: {
+        server: fallback?.server.id ?? null,
+        model: fallback?.model.id ?? null,
+        voice: fallback?.voice?.id ?? null,
+        speed: options.speed,
+      },
+      speeds: options.speeds,
+      maxChars: options.maxChars,
+      component: COMPONENT.id,
+    })
+  }
+
+  /**
+   * The multi-voice experiment flag: the browser mirrors it, the Host owns the
+   * prompt section that follows from it.
+   * @param req - node request.
+   * @param res - node response.
+   * @returns The response that was sent.
+   */
+  async function castRoute (req, res) {
+    if (req.method === 'POST') {
       let body
       try {
-        body = await readJson(req, 64 * 1024)
+        body = await readJson(req, 2048)
       } catch (error) {
-        return json(res, error.status ?? 400, { error: { code: 'body', message: error.message } })
+        return bodyError(res, error)
       }
-      const text = typeof body.text === 'string' ? body.text.trim() : ''
-      if (text === '') return json(res, 400, { error: { code: 'text', message: 'text is required' } })
-      if (text.length > options.maxChars) {
-        return json(res, 413, { error: { code: 'text', message: `text exceeds ${options.maxChars} characters` } })
+      const enabled = body?.enabled === true
+      if (enabled !== castEnabled) {
+        castEnabled = enabled
+        note('info', enabled ? 'cast-enabled' : 'cast-disabled')
       }
-      await protocol.discover('tts')
-      const chosen = choose({
-        server: typeof body.server === 'string' && body.server !== '' ? body.server : undefined,
-        model: typeof body.model === 'string' && body.model !== '' ? body.model : undefined,
-        voice: typeof body.voice === 'string' && body.voice !== '' ? body.voice : undefined,
-      })
-      if (chosen === null) {
-        note('warn', 'no-speech-model', { requested: { server: body.server ?? null, model: body.model ?? null } })
-        return json(res, 409, { error: { code: 'no-speech-model', message: 'no TTS model is configured as a provider' } })
-      }
-      const speed = number(body.speed, number(options.speed, 1, 0.25, 4), 0.25, 4)
-      try {
-        const audio = await synthesize(chosen, text, speed)
-        if (audio.cached) note('debug', 'synthesis-cache-hit', { model: chosen.model.id, chars: text.length })
-        res.writeHead(200, {
-          'content-type': audio.type,
-          'content-length': audio.body.length,
-          'cache-control': 'no-store',
-          'x-tts-server': chosen.server.id,
-          'x-tts-model': chosen.model.id,
-          'x-tts-cache': audio.cached ? 'hit' : 'miss',
-        })
-        return res.end(audio.body)
-      } catch (error) {
-        note('error', 'synthesis-failed', {
-          provider: chosen.server.id,
-          model: chosen.model.id,
-          voice: chosen.voice?.id ?? null,
-          chars: text.length,
-          status: error.status ?? 502,
-          message: String(error.message ?? error).slice(0, 240),
-        })
-        return json(res, error.status ?? 502, { error: { code: 'speech', message: error.message } })
-      }
+      return json(res, 200, { enabled: castEnabled })
     }
-    return json(res, 404, { error: { code: 'route', message: `unknown tts route: ${url.pathname}` } })
+    if (req.method === 'GET') return json(res, 200, { enabled: castEnabled })
+    return json(res, 405, { error: { code: 'method', message: 'GET or POST /tts/cast' } })
+  }
+
+  /**
+   * One synthesis: validate the text, select the engine, answer the audio.
+   * @param req - node request.
+   * @param res - node response.
+   * @returns The response that was sent.
+   */
+  async function speakRoute (req, res) {
+    let body
+    try {
+      body = await readJson(req, 64 * 1024)
+    } catch (error) {
+      return bodyError(res, error)
+    }
+    const text = typeof body.text === 'string' ? body.text.trim() : ''
+    if (text === '') return json(res, 400, { error: { code: 'text', message: 'text is required' } })
+    if (text.length > options.maxChars) {
+      return json(res, 413, { error: { code: 'text', message: `text exceeds ${options.maxChars} characters` } })
+    }
+    await protocol.discover('tts')
+    const chosen = choose({
+      server: typeof body.server === 'string' && body.server !== '' ? body.server : undefined,
+      model: typeof body.model === 'string' && body.model !== '' ? body.model : undefined,
+      voice: typeof body.voice === 'string' && body.voice !== '' ? body.voice : undefined,
+    })
+    if (chosen === null) {
+      note('warn', 'no-speech-model', { requested: { server: body.server ?? null, model: body.model ?? null } })
+      return json(res, 409, { error: { code: 'no-speech-model', message: 'no TTS model is configured as a provider' } })
+    }
+    const speed = number(body.speed, options.speed, 0.25, 4)
+    try {
+      const audio = await synthesize(chosen, text, speed)
+      if (audio.cached) note('debug', 'synthesis-cache-hit', { model: chosen.model.id, chars: text.length })
+      res.writeHead(200, {
+        'content-type': audio.type,
+        'content-length': audio.body.length,
+        'cache-control': 'no-store',
+        'x-tts-server': chosen.server.id,
+        'x-tts-model': chosen.model.id,
+        'x-tts-cache': audio.cached ? 'hit' : 'miss',
+      })
+      return res.end(audio.body)
+    } catch (error) {
+      note('error', 'synthesis-failed', {
+        provider: chosen.server.id,
+        model: chosen.model.id,
+        voice: chosen.voice?.id ?? null,
+        chars: text.length,
+        status: error.status ?? 502,
+        message: String(error.message ?? error).slice(0, 240),
+      })
+      return json(res, error.status ?? 502, { error: { code: 'speech', message: error.message } })
+    }
   }
 
   /* Optional service: the routes above work even when no prompt registry exists. */
@@ -278,6 +253,14 @@ export function apply (ctx, config = {}) {
     maxChars: options.maxChars,
   })
 
-  ctx.effect(() => ctx.webServer.register({ kind: 'prefix', path: '/tts', handler }), 'dsh-plugin-audio: /tts routes')
+  ctx.effect(() => ctx.webServer.register({
+    kind: 'prefix',
+    path: '/tts',
+    handler: routes([
+      { path: '/tts/info', method: 'GET', handle: infoRoute },
+      { path: '/tts/cast', method: '*', handle: castRoute },
+      { path: '/tts/speak', method: 'POST', handle: speakRoute },
+    ]),
+  }), 'dsh-plugin-audio: /tts routes')
   ctx.effect(() => protocol.registerComponent(COMPONENT), 'dsh-plugin-audio: tts component record')
 }

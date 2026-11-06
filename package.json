@@ -1,6 +1,6 @@
 {
   "name": "dsh-plugin-audio",
-  "description": "Speech for the Web GUI in one bundle: the shared OpenAI audio protocol, read-aloud, dictation, and a component inventory — four switchable components",
+  "description": "Speech for the Web GUI in one bundle: the shared OpenAI audio protocol, read-aloud, dictation, and a component inventory \u2014 four switchable components",
   "version": "0.0.1",
   "private": true,
   "type": "module",
@@ -20,18 +20,21 @@
     "./package.json": "./package.json"
   },
   "files": [
+    "README.md",
+    "cordis.patch.yml",
     "core/index.js",
     "core/locale/*.json",
-    "tts/index.js",
-    "tts/locale/*.json",
-    "stt/index.js",
-    "stt/locale/*.json",
+    "lib/client.js",
+    "lib/config.js",
+    "lib/http.js",
+    "lib/protocol.js",
+    "locale/*.json",
     "status/index.js",
     "status/locale/*.json",
-    "lib/client.js",
-    "locale/*.json",
-    "README.md",
-    "cordis.patch.yml"
+    "stt/index.js",
+    "stt/locale/*.json",
+    "tts/index.js",
+    "tts/locale/*.json"
   ],
   "dsh": {
     "client": {
