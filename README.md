@@ -24,6 +24,28 @@ while the machinery they share is written once.
 state is shared between components — the surfaces reach the protocol through the
 `audioProtocol` service that `audio-core` provides.
 
+## Layout
+
+One package, four row modules, and the shared modules they import:
+
+```text
+core/index.js        audio-core    provides audioProtocol, mounts /audio/log
+tts/index.js         audio-tts     /tts/info, /tts/speak, /tts/cast
+stt/index.js         audio-stt     /stt/info, /stt/transcribe
+status/index.js      audio-status  /audio/status, /audio/echo
+lib/protocol.js      the engine: discovery, wire calls, event log, component registry
+lib/http.js          JSON responses, bounded bodies, the route-table dispatcher
+lib/config.js        the config readers every row clamps through
+lib/client.js        the browser half — one bundle, because the shell evaluates it as a script
+{core,tts,stt,status}/locale/en.json + zh.json   the row title and description, per component
+```
+
+Every row reuses the same HTTP plumbing, the same config readers, and the same
+protocol engine; nothing about a server, model, or voice is baked into any of
+them. The browser half keeps the mirror image: one panel chrome (anchor
+placement, outside-click, Escape), one chip row, one field renderer, and one
+selection resolver for both bands.
+
 ## Components and their switches
 
 Each row is independent. Switch `audio-tts` off and the Listen control and
