@@ -14,6 +14,16 @@ import { apply as stt, inject as sttInject } from '../stt/index.js'
 import { apply as status, inject as statusInject } from '../status/index.js'
 import { fakeEngine, mountAudio, wavBytes } from './harness.mjs'
 
+/** A stand-in for a `.volatile()` config reference: a value the settings service updates in place. */
+function volatileRef (initial) {
+  let current = initial
+  const reference = {
+    get: () => current,
+    [Symbol.for('cosmokit.volatile.write')]: (next) => { current = next },
+  }
+  return { reference, set: (next) => reference[Symbol.for('cosmokit.volatile.write')](next) }
+}
+
 /** Provider profiles keyed by provider id, as the profile stores them. */
 const providersOf = (engine, id = 'speech') => ({ [id]: { api: 'openai-completions', baseURL: engine.baseURL } })
 
@@ -282,6 +292,29 @@ test('dictation: the language hint is omitted when it is auto, and bad bodies ar
     assert.equal((await tiny.json()).error.code, 'audio')
     assert.equal((await fetch(`${plugin.origin}/stt/transcribe`)).status, 405)
     assert.equal((await fetch(`${plugin.origin}/stt/nope`)).status, 404)
+  } finally {
+    await plugin.close()
+    await engine.close()
+  }
+})
+
+test('a volatile config field is read live, without re-applying the row', async () => {
+  /* A `.volatile()` field reaches the plugin as a reference the settings service
+     updates in place; the row must see the new value without a restart. */
+  const engine = await fakeEngine({ models: [{ id: 'voice-a', task: 'tts' }], voices: { 'voice-a': ['af_heart'] } })
+  const limit = volatileRef(40)
+  const plugin = await mountAudio({ providers: providersOf(engine), config: { tts: { maxChars: limit.reference } } })
+  try {
+    const speak = (text) => fetch(`${plugin.origin}/tts/speak`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ text, model: 'voice-a', voice: 'af_heart' }),
+    })
+    assert.equal((await speak('x'.repeat(41))).status, 413, 'the initial bound applies')
+    limit.set(4000)
+    assert.equal((await speak('x'.repeat(41))).status, 200, 'the updated bound applies without re-mounting')
+    const info = await (await fetch(`${plugin.origin}/tts/info`)).json()
+    assert.equal(info.maxChars, 4000)
   } finally {
     await plugin.close()
     await engine.close()

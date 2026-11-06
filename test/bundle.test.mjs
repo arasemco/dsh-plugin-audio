@@ -136,6 +136,12 @@ test('every row publishes a native config schema, so it has a Plugins-screen for
   assert.equal(manifest.dependencies['@deepseek-ai/schemastery'] !== undefined, true, 'the package declares the schema dependency')
 })
 
+/** The value a parsed schema field stands for: a volatile field is a live reference. */
+function valueOf (field) {
+  const write = Symbol.for('cosmokit.volatile.write')
+  return typeof field === 'object' && field !== null && write in field ? field.get() : field
+}
+
 test('each schema default is the value the row falls back to', async () => {
   const cases = {
     core: { discoveryTtlMs: 15000, logLimit: 200 },
@@ -148,8 +154,39 @@ test('each schema default is the value the row falls back to', async () => {
     const module = await import(new URL(`${row}/index.js`, root))
     const defaults = module.Config({})
     for (const [field, value] of Object.entries(expected)) {
-      assert.deepEqual(defaults[field], value, `${row}.${field} defaults to the row's own fallback`)
+      assert.deepEqual(valueOf(defaults[field]), value, `${row}.${field} defaults to the row's own fallback`)
     }
+  }
+})
+
+test('the fields a configuration page edits are volatile, which is what publishes them', async () => {
+  /* `settings.describe()` projects each row's schema through volatileForm: only
+     `.volatile()` fields survive, and an entry with none is skipped entirely —
+     no settings namespace, no form, no configuration page. The page's field list
+     and the schema's volatile marks therefore have to say the same thing. */
+  const pageFields = {
+    core: ['voiceCatalog', 'discoveryTtlMs', 'logLimit'],
+    tts: ['server', 'model', 'voice', 'speed', 'maxChars'],
+    stt: ['server', 'model', 'language', 'maxAudioBytes'],
+    status: ['sample'],
+  }
+  for (const [row, fields] of Object.entries(pageFields)) {
+    const module = await import(new URL(`${row}/index.js`, root))
+    const volatileFields = Object.entries(module.Config.dict ?? {})
+      .filter(([, child]) => child?.meta?.volatile === true)
+      .map(([name]) => name)
+    assert.deepEqual(volatileFields.sort(), [...fields].sort(), `${row}: the volatile fields are exactly the page's fields`)
+  }
+  /* The browser half must edit exactly what the schema publishes. */
+  const client = readFileSync(new URL('lib/client.js', root), 'utf8')
+  for (const [row, fields] of Object.entries(pageFields)) {
+    const start = client.indexOf(`rowId: 'audio-${row}'`)
+    assert.ok(start >= 0, `a page exists for audio-${row}`)
+    const rest = client.slice(start)
+    const end = rest.indexOf('rowId:', 10)
+    const block = end < 0 ? rest : rest.slice(0, end)
+    const listed = [...block.matchAll(/name: '([a-zA-Z]+)'/g)].map((match) => match[1])
+    assert.deepEqual(listed, fields, `audio-${row}: the page shows exactly the volatile fields`)
   }
 })
 

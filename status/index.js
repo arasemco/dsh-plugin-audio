@@ -16,6 +16,7 @@ import { readFile } from 'node:fs/promises'
 
 import z from '@deepseek-ai/schemastery'
 
+import { liveOptions } from '../lib/config.js'
 import { json, readJson, bodyError, routes } from '../lib/http.js'
 
 /** This package's own manifest, so the inventory reports the installed version. */
@@ -33,9 +34,12 @@ const COMPONENT = {
   routes: ['/audio/status', '/audio/echo'],
 }
 
-/** This row's config schema: the sentence the round-trip test speaks. */
+/**
+ * This row's config schema: the sentence the round-trip test speaks. It is
+ * `.volatile()` because the settings service publishes only volatile fields.
+ */
 export const Config = z.object({
-  sample: z.string().default(SAMPLE).description('Sentence the round-trip test speaks when the request names none'),
+  sample: z.string().default(SAMPLE).description('Sentence the round-trip test speaks when the request names none').volatile(),
 })
 
 /** Required Host services: routes and the bundle's protocol service. */
@@ -65,7 +69,10 @@ async function whoami () {
  */
 export function apply (ctx, config = {}) {
   const protocol = ctx.audioProtocol
-  const sample = typeof config.sample === 'string' && config.sample.trim() !== '' ? config.sample.trim().slice(0, 400) : SAMPLE
+  /* The sentence is a live reference: a settings write changes it without a restart. */
+  const options = liveOptions(config, { sample: SAMPLE }, {
+    sample: (value, fallback) => (typeof value === 'string' && value.trim() !== '' ? value.trim().slice(0, 400) : fallback),
+  })
 
   /** Write one event to the bundle log, tagged as this component. */
   function note (level, event, detail) {
@@ -103,7 +110,7 @@ export function apply (ctx, config = {}) {
     } catch (error) {
       return bodyError(res, error)
     }
-    const text = typeof body.text === 'string' && body.text.trim() !== '' ? body.text.trim().slice(0, 500) : sample
+    const text = typeof body.text === 'string' && body.text.trim() !== '' ? body.text.trim().slice(0, 500) : options.sample
     await Promise.all([protocol.discover('tts'), protocol.discover('stt')])
     const spoken = protocol.resolve('tts', {}, {})
     if (spoken === null) {
@@ -159,7 +166,7 @@ export function apply (ctx, config = {}) {
     }
   }
 
-  note('info', 'ready', { sample: sample.length })
+  note('info', 'ready', { sample: options.sample.length })
 
   const handler = routes([
     { path: '/audio/status', method: 'GET', handle: statusRoute },

@@ -110,6 +110,10 @@ The file stays the source of truth, so either way of editing shows up in the
 other: an override made by hand appears in the page as a field with a Reset
 control, and a Reset removes the override and re-inherits the row's default.
 
+The fields the page edits are `.volatile()` config fields — the only kind the
+settings service publishes — and the rows read them at use time, so saving in the
+page reaches the running row without a restart.
+
 Nothing about this machine is baked into the package; machine-specific values
 belong in the profile's own patch, for example:
 

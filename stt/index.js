@@ -15,7 +15,7 @@
 
 import z from '@deepseek-ai/schemastery'
 
-import { number } from '../lib/config.js'
+import { liveOptions, number } from '../lib/config.js'
 import { bodyError, json, readBody, routes } from '../lib/http.js'
 
 /** Dictation defaults; no server, model, or language is assumed. */
@@ -42,14 +42,16 @@ const COMPONENT = {
 }
 
 /**
- * This row's config schema: the dictation preferences, published as this row's
- * form on the Plugins page. Range enforcement stays in `apply`.
+ * This row's config schema: the dictation preferences. The fields the row's
+ * configuration page edits are `.volatile()` because the settings service
+ * publishes only volatile fields; a schema with none gets no form. Range
+ * enforcement stays in `apply`.
  */
 export const Config = z.object({
-  server: z.union([z.string(), z.const(null)]).default(DEFAULTS.server).description('Preferred provider id; unset means the first discovered'),
-  model: z.union([z.string(), z.const(null)]).default(DEFAULTS.model).description('Preferred model id; unset means the first discovered'),
-  language: z.union([z.string(), z.const(null)]).default(DEFAULTS.language).description('Language hint, or null to let the model detect it'),
-  maxAudioBytes: z.natural().default(DEFAULTS.maxAudioBytes).description('Largest accepted recording'),
+  server: z.union([z.string(), z.const(null)]).default(DEFAULTS.server).description('Preferred provider id; unset means the first discovered').volatile(),
+  model: z.union([z.string(), z.const(null)]).default(DEFAULTS.model).description('Preferred model id; unset means the first discovered').volatile(),
+  language: z.union([z.string(), z.const(null)]).default(DEFAULTS.language).description('Language hint, or null to let the model detect it').volatile(),
+  maxAudioBytes: z.natural().default(DEFAULTS.maxAudioBytes).description('Largest accepted recording').volatile(),
 })
 
 /** Required Host services: routes and the bundle's protocol service. */
@@ -61,11 +63,11 @@ export const inject = ['webServer', 'audioProtocol']
  * @param config - Preferences and the accepted recording size.
  */
 export function apply (ctx, config = {}) {
-  const options = {
-    ...DEFAULTS,
-    ...config,
-    maxAudioBytes: number(config.maxAudioBytes, DEFAULTS.maxAudioBytes, 1024, 512 * 1024 * 1024),
-  }
+  /* The page's fields are live references; every read below clamps what the
+     settings service last accepted, without a row restart. */
+  const options = liveOptions(config, DEFAULTS, {
+    maxAudioBytes: (value, fallback) => number(value, fallback, 1024, 512 * 1024 * 1024),
+  })
   const protocol = ctx.audioProtocol
 
   /** Write one event to the bundle log, tagged as this component. */

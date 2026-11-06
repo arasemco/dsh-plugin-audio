@@ -13,9 +13,9 @@
 
 import z from '@deepseek-ai/schemastery'
 
-import { number } from '../lib/config.js'
+import { liveOptions, number } from '../lib/config.js'
 import { bodyError, json, readJson, routes } from '../lib/http.js'
-import { DEFAULTS, LEVELS, createProtocol, optionsOf } from '../lib/protocol.js'
+import { DEFAULTS, LEVELS, createProtocol } from '../lib/protocol.js'
 
 /** The component record the inventory row reports while this row is mounted. */
 const COMPONENT = {
@@ -28,19 +28,23 @@ const COMPONENT = {
 
 /**
  * This row's config schema. The Loader parses the row's config through it, so the
- * defaults here are the values a profile that sets nothing gets, and the settings
- * service publishes exactly these fields as this row's form on the Plugins page.
- * Ranges stay in `optionsOf`, which clamps every value the row ever sees.
+ * defaults here are the values a profile that sets nothing gets.
+ *
+ * The fields this row's configuration page edits are marked `.volatile()`: the
+ * settings service publishes only volatile fields (`volatileForm` drops the rest
+ * and skips an entry with none), so the mark is what gives the row a settings
+ * namespace and a form at all. Everything else stays patch-only. Ranges stay in
+ * `optionsOf`, which clamps every value the row ever sees.
  */
 export const Config = z.object({
   endpoints: z.array(z.any()).default(DEFAULTS.endpoints).description('Extra audio servers that are not configured model providers'),
-  discoveryTtlMs: z.natural().default(DEFAULTS.discoveryTtlMs).description('How long a discovery result is reused, in milliseconds'),
+  discoveryTtlMs: z.natural().default(DEFAULTS.discoveryTtlMs).description('How long a discovery result is reused, in milliseconds').volatile(),
   failureTtlMs: z.natural().default(DEFAULTS.failureTtlMs).description('How long a provider that failed its probe is left alone, in milliseconds'),
   probeTimeoutMs: z.natural().default(DEFAULTS.probeTimeoutMs).description('Upper bound for one capability probe, in milliseconds'),
-  logLimit: z.natural().default(DEFAULTS.logLimit).description('Retained entries in the shared event log'),
+  logLimit: z.natural().default(DEFAULTS.logLimit).description('Retained entries in the shared event log').volatile(),
   speakTimeoutMs: z.natural().default(DEFAULTS.speakTimeoutMs).description('Upper bound for one synthesis request, in milliseconds'),
   transcribeTimeoutMs: z.natural().default(DEFAULTS.transcribeTimeoutMs).description('Upper bound for one transcription request, in milliseconds'),
-  voiceCatalog: z.array(z.string()).default(DEFAULTS.voiceCatalog).description('Paths to the engines own server.json catalogs, for voice tags'),
+  voiceCatalog: z.array(z.string()).default(DEFAULTS.voiceCatalog).description('Paths to the engines own server.json catalogs, for voice tags').volatile(),
 })
 
 /** Required Host services: routes, provider configuration, and the provider directory. */
@@ -52,7 +56,18 @@ export const inject = ['webServer', 'settings', 'llm']
  * @param config - Endpoint overrides and probe/log budgets.
  */
 export function apply (ctx, config = {}) {
-  const options = optionsOf(config)
+  /* Fields the configuration page edits arrive as live references; these getters
+     read them at use time, so a settings write lands without a row restart. */
+  const options = liveOptions(config, DEFAULTS, {
+    endpoints: (value) => (Array.isArray(value) ? value : []),
+    discoveryTtlMs: (value, fallback) => number(value, fallback, 0, 600000),
+    failureTtlMs: (value, fallback) => number(value, fallback, 0, 3600000),
+    probeTimeoutMs: (value, fallback) => number(value, fallback, 250, 120000),
+    logLimit: (value, fallback) => number(value, fallback, 1, 5000),
+    speakTimeoutMs: (value, fallback) => number(value, fallback, 1000, 3600000),
+    transcribeTimeoutMs: (value, fallback) => number(value, fallback, 1000, 3600000),
+    voiceCatalog: (value) => (Array.isArray(value) ? value : [value]).filter((path) => typeof path === 'string' && path !== ''),
+  })
   const protocol = createProtocol(ctx, options)
 
   /**

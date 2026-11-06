@@ -17,7 +17,7 @@ import { createHash } from 'node:crypto'
 
 import z from '@deepseek-ai/schemastery'
 
-import { number, numbers } from '../lib/config.js'
+import { liveOptions, number, numbers } from '../lib/config.js'
 import { bodyError, json, readJson, routes } from '../lib/http.js'
 
 /** Read-aloud defaults; no server, model, or voice is assumed. */
@@ -58,16 +58,18 @@ const COMPONENT = {
 }
 
 /**
- * This row's config schema: the read-aloud preferences, published as this row's
- * form on the Plugins page. Range enforcement stays in `apply`.
+ * This row's config schema: the read-aloud preferences. The fields the row's
+ * configuration page edits are `.volatile()` because the settings service
+ * publishes only volatile fields; a schema with none gets no form. Range
+ * enforcement stays in `apply`.
  */
 export const Config = z.object({
-  server: z.union([z.string(), z.const(null)]).default(DEFAULTS.server).description('Preferred server id; unset means the first discovered'),
-  model: z.union([z.string(), z.const(null)]).default(DEFAULTS.model).description('Preferred model id; unset means the first discovered'),
-  voice: z.union([z.string(), z.const(null)]).default(DEFAULTS.voice).description('Preferred voice id or label; unset means the engine default'),
-  speed: z.number().default(DEFAULTS.speed).description('Speaking rate applied when a request names none'),
+  server: z.union([z.string(), z.const(null)]).default(DEFAULTS.server).description('Preferred server id; unset means the first discovered').volatile(),
+  model: z.union([z.string(), z.const(null)]).default(DEFAULTS.model).description('Preferred model id; unset means the first discovered').volatile(),
+  voice: z.union([z.string(), z.const(null)]).default(DEFAULTS.voice).description('Preferred voice id or label; unset means the engine default').volatile(),
+  speed: z.number().default(DEFAULTS.speed).description('Speaking rate applied when a request names none').volatile(),
   speeds: z.array(z.number()).default([...DEFAULTS.speeds]).description('Rates offered by the player'),
-  maxChars: z.natural().default(DEFAULTS.maxChars).description('Longest text one synthesis request accepts'),
+  maxChars: z.natural().default(DEFAULTS.maxChars).description('Longest text one synthesis request accepts').volatile(),
   cacheBytes: z.natural().default(DEFAULTS.cacheBytes).description('Bytes of synthesized audio kept for instant replay'),
 })
 
@@ -80,14 +82,14 @@ export const inject = ['webServer', 'audioProtocol']
  * @param config - Preferences, rate list, request ceiling, and cache budget.
  */
 export function apply (ctx, config = {}) {
-  const options = {
-    ...DEFAULTS,
-    ...config,
-    speed: number(config.speed, DEFAULTS.speed, 0.25, 4),
-    speeds: numbers(config.speeds, DEFAULTS.speeds),
-    maxChars: number(config.maxChars, DEFAULTS.maxChars, 1, 20000),
-    cacheBytes: number(config.cacheBytes, DEFAULTS.cacheBytes, 0, 512 * 1024 * 1024),
-  }
+  /* The page's fields are live references; every read below clamps what the
+     settings service last accepted, without a row restart. */
+  const options = liveOptions(config, DEFAULTS, {
+    speed: (value, fallback) => number(value, fallback, 0.25, 4),
+    speeds: (value, fallback) => numbers(value, fallback),
+    maxChars: (value, fallback) => number(value, fallback, 1, 20000),
+    cacheBytes: (value, fallback) => number(value, fallback, 0, 512 * 1024 * 1024),
+  })
   const protocol = ctx.audioProtocol
 
   /** Synthesized-audio cache: key → audio. Insertion order doubles as LRU order. */
