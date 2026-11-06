@@ -1,14 +1,13 @@
 name: Release
 
-# The entry workflow, and the chain: release.yml → version.yml → test.yml, each
-# gated by needs. One trigger here, the other two workflows are workflow_call
-# only. version.yml tags the commit that already carries the locally bumped
-# manifest; then this workflow publishes that tag.
+# The entry workflow and the chain: release.yml → version.yml → test.yml. On a
+# push to main, version.yml runs the test workflow, tags the commit that already
+# carries the locally bumped manifest, and hands the tag back; this workflow
+# then publishes it. Pull requests only run test.yml.
 on:
   push:
     branches:
       - main
-  pull_request:
 
 permissions:
   contents: read

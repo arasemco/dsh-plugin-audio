@@ -1,9 +1,9 @@
 name: Version
 
-# Mini workflow: tag the version the pushed commit already carries. The bump is
-# local — .githooks/pre-commit updates the manifest before the commit — so
-# nothing here decides, commits or pushes a version. Chained after test.yml and
-# called by release.yml, which consumes the outputs below.
+# Mini workflow: run the test workflow, then tag the version the pushed commit
+# already carries. The bump is local — .githooks/pre-commit updates the manifest
+# before the commit — so nothing here decides, commits or pushes a version.
+# Called by release.yml, which chains the publish job on the outputs below.
 on:
   workflow_call:
     outputs:
@@ -23,7 +23,6 @@ jobs:
 
   version:
     needs: test
-    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     outputs:
       tag: ${{ steps.manifest.outputs.tag }}

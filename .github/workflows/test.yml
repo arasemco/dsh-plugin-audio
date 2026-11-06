@@ -1,8 +1,9 @@
 name: Test
 
-# Mini workflow: run the suites. Chained under version.yml, which is chained
-# under release.yml; the entry workflow owns the trigger, this one only runs.
+# Mini workflow: the suites, nothing else. Runs on pull requests, and is called
+# by version.yml as the gate before a version is tagged.
 on:
+  pull_request:
   workflow_call:
 
 permissions:
