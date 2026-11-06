@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# Bump the package version and stage it with the commit.
+#
+# Versioning happens locally: the release pipeline no longer commits a bump on
+# push, so the commit itself carries the version the Version workflow tags. A
+# version change already staged by hand is left alone.
+set -euo pipefail
+
+if ! git diff --cached --quiet -- package.json; then
+    exit 0
+fi
+
+npm version patch --no-git-tag-version >/dev/null
+git add package.json

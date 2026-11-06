@@ -1,10 +1,10 @@
 name: Version
 
-# One responsibility: decide the next semver from the commits since the last
-# tag, then commit that bump and tag it. It publishes nothing.
-#
-# The bump push uses GITHUB_TOKEN, which starts no other workflow, so the tag is
-# consumed through workflow_run in release.yml rather than through a tag event.
+# One responsibility: tag the version the pushed commit already carries. The
+# bump is local — .githooks/pre-commit updates the manifest before the commit —
+# so nothing here decides, commits or pushes a version. This workflow only
+# creates the annotated tag; release.yml publishes it, because a tag pushed with
+# GITHUB_TOKEN emits no event of its own.
 on:
   push:
     branches:
@@ -28,22 +28,20 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-      - name: Next version
-        id: next
-        run: ./scripts/next-version.sh >> "$GITHUB_OUTPUT"
-      # [skip ci] keeps the bump push from starting anything, belt and braces.
-      - name: Commit and tag
-        if: steps.next.outputs.bump != 'none'
-        env:
-          TAG: v${{ steps.next.outputs.version }}
+      - name: Read the manifest version
+        id: manifest
         run: |
-          npm version "${{ steps.next.outputs.version }}" --no-git-tag-version
+          version="$(node -p "require('./package.json').version")"
+          echo "tag=v${version}" >> "$GITHUB_OUTPUT"
+      - name: Tag
+        env:
+          TAG: ${{ steps.manifest.outputs.tag }}
+        run: |
+          if git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
+            echo "${TAG} exists already; nothing to tag"
+            exit 0
+          fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -am "chore(release): ${TAG} [skip ci]"
           git tag -a "${TAG}" -m "${TAG}"
-          git push origin HEAD:main
           git push origin "${TAG}"

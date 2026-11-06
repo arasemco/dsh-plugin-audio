@@ -28,12 +28,18 @@ jobs:
       - name: Read the tag on main
         id: tag
         run: |
-          tag="$(git describe --tags --exact-match)"
+          tag="$(git describe --tags --exact-match 2>/dev/null || true)"
+          if [ -z "${tag}" ]; then
+            echo "no tag on main; nothing to release"
+            exit 0
+          fi
           echo "tag=${tag}" >> "$GITHUB_OUTPUT"
           echo "release ${tag}"
       - name: Build tarball
+        if: steps.tag.outputs.tag != ''
         run: npm pack
       - name: Record tarball SHA-256
+        if: steps.tag.outputs.tag != ''
         run: |
           echo '### Tarball SHA-256' >> "$GITHUB_STEP_SUMMARY"
           echo '```text' >> "$GITHUB_STEP_SUMMARY"
@@ -41,6 +47,7 @@ jobs:
           echo '```' >> "$GITHUB_STEP_SUMMARY"
           sha256sum *.tgz
       - name: Create release
+        if: steps.tag.outputs.tag != ''
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.tag.outputs.tag }}
