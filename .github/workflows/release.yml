@@ -3,7 +3,9 @@ name: Release
 # The entry workflow and the chain: release.yml → version.yml → test.yml. On a
 # push to main, version.yml runs the test workflow, tags the commit that already
 # carries the locally bumped manifest, and hands the tag back; this workflow
-# then publishes it. Pull requests only run test.yml.
+# then publishes it. Pull requests only run test.yml. The release itself is
+# created through the API (Gitea's included), since the marketplace release
+# actions target GitHub's.
 on:
   push:
     branches:
@@ -46,8 +48,19 @@ jobs:
           echo '```' >> "$GITHUB_STEP_SUMMARY"
           sha256sum *.tgz
       - name: Create release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ needs.version.outputs.tag }}
-          generate_release_notes: true
-          files: '*.tgz'
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.version.outputs.tag }}
+        run: |
+          set -euo pipefail
+          api="${GITHUB_API_URL:-https://git.omesa.net/api/v1}/repos/${GITHUB_REPOSITORY}"
+          id="$(curl -sS -X POST -H "Authorization: token ${TOKEN}" -H 'content-type: application/json' \
+            "${api}/releases" \
+            -d "{\"tag_name\":\"${TAG}\",\"name\":\"${TAG}\",\"body\":\"Release ${TAG}\",\"draft\":false,\"prerelease\":false}" \
+            | python3 -c 'import json,sys;print(json.load(sys.stdin)["id"])')"
+          for file in *.tgz; do
+            curl -sS -X POST -H "Authorization: token ${TOKEN}" \
+              "${api}/releases/${id}/assets?name=$(basename "$file")" \
+              -F "attachment=@${file}"
+          done
+          echo "release ${TAG} published with ${id}"
